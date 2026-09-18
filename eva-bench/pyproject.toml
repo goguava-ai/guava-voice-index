@@ -1,0 +1,107 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eva"
+dynamic = ["version"]
+description = "A New End-to-end Framework for Evaluating Voice Agents (EVA)"
+authors = [
+    { name = "Tara Bogavelli" },
+    { name = "Gabrielle Gauthier Melançon" },
+    { name = "Katrina Stankiewicz" },
+    { name = "Oluwanifemi Bamgbose" },
+    { name = "Hoang Nguyen" },
+    { name = "Raghav Mehndiratta" },
+    { name = "Hari Subramani" },
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "pipecat-ai>=1.4.0",
+    "elevenlabs>=2.53.0",
+    "openai>=2.36.0",
+    "anthropic>=0.83.0",
+    "litellm==1.85.0",
+    "deepgram-sdk>=7",
+    "onnxruntime>=1.16.0",
+    "aioboto3>=12.0.0",
+    "google-genai>=1.69.0",
+    "google-cloud-speech>=2.0.0",
+    "google-cloud-texttospeech>=2.0.0",
+    "azure-cognitiveservices-speech>=1.31.0",
+    "cartesia>=1.0.0",
+    "assemblyai>=0.17.0",
+    "setuptools>=65.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "websockets>=12.0",
+    "httpx>=0.25.0",
+    "pyyaml>=6.0",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "pydub>=0.25.0",
+    "aiofiles>=23.0",
+    "structlog>=23.0",
+    "tqdm>=4.65",
+    "python-dotenv>=1.0.0",
+    "jiwer>=3.0.0",
+    "jaconv>=0.3.0",
+    "regex>=2023.0.0",
+    "more-itertools>=10.0.0",
+    "statsmodels>=0.14.6",
+    "guava-sdk>=0.40.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5",
+    "pre-commit>=4.0",
+]
+apps = [
+    "pandas>=2.0",
+    "plotly>=5.0",
+    "streamlit>=1.56.0",
+    "streamlit-diff-viewer>=0.0.2",
+    "librosa>=0.11",
+    "soundfile>=0.13",
+    "audioread>=3.1",
+]
+
+
+[project.scripts]
+eva = "eva.cli:main"
+
+[tool.hatch.version]
+path = "src/eva/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eva"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+# https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
+select = ["A", "B0", "C4", "D2", "D4", "E", "F", "FURB", "I", "PYI", "UP"]
+ignore = ["D203", "D206", "D213", "D400", "D401", "D413", "D415", "E1", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true

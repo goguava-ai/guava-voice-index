@@ -20,8 +20,7 @@ voice agent.
 - 📦 Dataset: [ServiceNow-AI/eva-bench](https://huggingface.co/datasets/ServiceNow-AI/eva-bench)
 - 💻 Source: [github.com/ServiceNow/eva](https://github.com/ServiceNow/eva)
 
-If you use the metrics in this folder, please cite and credit EVA. See
-[`README.md`](README.md) for the upstream EVA documentation.
+If you use the metrics in this folder, please cite and credit EVA.
 
 ---
 
@@ -128,10 +127,11 @@ directly.
 See `.env.example` at the repo root for the complete list of configuration
 options.
 
-### Running our voice agent
+### Running a voice agent
 
-This is the primary way to run an evaluation. Start the agent's endpoint first,
-then run the scenario runner from `eva-bench/`:
+A scenario runner is the primary way to run an evaluation. This repo ships one,
+`guava_daytona_runner.py`, as a worked example that evaluates the Guava Daytona
+agent. Start the agent's endpoint first, then run the runner from `eva-bench/`:
 
 ```bash
 .venv/bin/python guava_daytona_runner.py [RECORD_ID] [NUM_TRIALS] [--domain DOMAIN]
@@ -140,9 +140,30 @@ then run the scenario runner from `eva-bench/`:
 .venv/bin/python guava_daytona_runner.py 1.1.2 2 --domain airline
 ```
 
-The runner reads the repo-root `.env`, sets `EVA_METRICS` to the 7 EVA metrics
-above, and launches the EVA benchmark against the agent. No virtualenv activation
-and no direct `eva` CLI use are required.
+A runner reads the repo-root `.env`, selects the agent under test via
+`EVA_FRAMEWORK`, sets `EVA_METRICS` to the 7 EVA metrics above, and launches the
+EVA benchmark. No virtualenv activation and no direct `eva` CLI use are required.
+
+#### Evaluating a different voice agent
+
+EVA picks the agent under test from `EVA_FRAMEWORK`, so pointing it at another
+voice agent means selecting (or adding) a framework:
+
+- **Use a built-in framework.** EVA ships adapters for several agents/providers —
+  run `eva --help` and see `--framework` for the current list (e.g. `pipecat`,
+  `openai_realtime`, `gemini_live`, `elevenlabs`, `vapi`). Run one directly:
+  ```bash
+  set -a; . ../.env; set +a        # load the root .env for the eva CLI
+  eva --framework openai_realtime --domain airline --record-ids 1.1.2
+  ```
+  Supply that framework's connection settings via the matching `EVA_MODEL__*`
+  variables (see `.env.example`).
+
+- **Add your own agent.** Implement an `AssistantServer` for it under
+  `src/eva/assistant/`, register it in the framework dispatch in
+  `src/eva/orchestrator/worker.py`, then copy `guava_daytona_runner.py` as a
+  template and change the `EVA_FRAMEWORK` and connection settings to point at your
+  agent. The metric selection and everything downstream stays the same.
 
 ### Advanced: the EVA CLI directly
 
