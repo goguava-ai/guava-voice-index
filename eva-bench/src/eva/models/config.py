@@ -372,14 +372,6 @@ def get_pipeline_type(model_data: dict) -> PipelineType:
     ``llm_model`` in a flat dict.
     """
     if s2s_value := model_data.get("s2s"):
-        # ElevenLabs and Guava use the s2s_params slot for configuration (they are
-        # external voice agents EVA reaches over the wire, not models EVA runs the
-        # STT/LLM/TTS for), but both are cascade pipelines internally. Scoring them
-        # as CASCADE makes EVA use their native transcripts (audit_log) for the
-        # conversation trace and enables the cascade-only metrics. This is
-        # metrics-only: ModelConfig.pipeline_type (the property that drives
-        # validation/runtime) still resolves the s2s slot to S2S. Both servers emit
-        # llm_response framework events so intended_assistant_turns is populated.
         if s2s_value in ("elevenlabs", "guava_daytona"):
             return PipelineType.CASCADE
         # Ultravox uses s2s_params for plumbing but is an audio-LLM (audio in, text out, separate TTS)
@@ -559,7 +551,7 @@ class RunConfig(BaseSettings):
     # Framework selection
     framework: Literal[
         "pipecat", "openai_realtime", "gemini_live", "elevenlabs", "grok_voice", "smallest_hydra",
-        "guava", "guava_daytona", "guava_native", "guava_sdk", "vapi"
+        "guava_daytona", "vapi"
     ] = (
         Field(
             "pipecat",
@@ -571,10 +563,7 @@ class RunConfig(BaseSettings):
                 "'elevenlabs': ElevenLabs Conversational AI API."
                 "'grok_voice': xAI Grok voice realtime API."
                 "'smallest_hydra': Smallest Hydra speech-to-speech API."
-                "'guava': Guava voice agent via a SIP call bridge."
                 "'guava_daytona': Guava Daytona voice agent over a WebSocket endpoint."
-                "'guava_native': Guava voice agent via a SIP call bridge (native integration)."
-                "'guava_sdk': Guava voice agent via a SIP call bridge (SDK integration)."
                 "'vapi': Vapi hosted voice agent over its WebSocket call transport (tools resolved locally via a co-hosted webhook)."
             ),
         )
