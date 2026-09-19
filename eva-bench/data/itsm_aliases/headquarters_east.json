@@ -1,0 +1,57 @@
+{
+  "name": "Headquarters East",
+  "translatable": true,
+  "base": [
+    "hq east",
+    "east building"
+  ],
+  "translations": {
+    "fr": [
+      "aile est du siège",
+      "annexe est",
+      "annexe est du siège",
+      "bâtiment est",
+      "bâtiment est du siège",
+      "qg est",
+      "site est du siège",
+      "siège est",
+      "siège social est",
+      "édifice est"
+    ],
+    "fr-CA": [
+      "aile est du siège",
+      "annexe est",
+      "annexe est du siège",
+      "bâtiment est",
+      "bâtiment est du siège",
+      "qg est",
+      "site est du siège",
+      "siège est",
+      "siège social est",
+      "édifice est"
+    ],
+    "es": [
+      "edificio este",
+      "sede central este",
+      "sede este",
+      "zona este de la sede"
+    ],
+    "de": [
+      "hauptsitz ost",
+      "ostgebäude",
+      "zentrale ost"
+    ],
+    "hi": [
+      "ईस्ट बिल्डिंग",
+      "एच क्यू ईस्ट",
+      "पूर्वी बिल्डिंग",
+      "मुख्यालय ईस्ट"
+    ],
+    "ko": [
+      "동관",
+      "본부 동관",
+      "본사 동관",
+      "본사 동쪽 건물"
+    ]
+  }
+}

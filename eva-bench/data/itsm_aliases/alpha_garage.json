@@ -1,0 +1,44 @@
+{
+  "name": "Alpha Garage",
+  "translatable": true,
+  "base": [
+    "alpha",
+    "main garage"
+  ],
+  "translations": {
+    "fr": [
+      "garage alpha",
+      "garage principal",
+      "parking alpha",
+      "parking principal",
+      "stationnement alpha"
+    ],
+    "fr-CA": [
+      "garage alpha",
+      "garage principal",
+      "parking alpha",
+      "parking principal",
+      "stationnement alpha"
+    ],
+    "es": [
+      "aparcamiento alfa",
+      "garaje alfa",
+      "garaje principal",
+      "parking alfa"
+    ],
+    "de": [
+      "parkhaus alpha"
+    ],
+    "hi": [
+      "अल्फा गैराज",
+      "अल्फा पार्किंग",
+      "मुख्य गैराज"
+    ],
+    "ko": [
+      "메인 차고",
+      "알파 주차동",
+      "알파 주차장",
+      "알파 차고"
+    ]
+  }
+}
