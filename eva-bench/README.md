@@ -81,7 +81,9 @@ EVA's **validation gates** (`conversation_valid_end`, `user_behavioral_fidelity`
 correctly executed conversations enter evaluation. They run via a separate path
 and are independent of the reported-metric selection above.
 
-To restore EVA's full metric set, set `EVA_METRICS=all`.
+This folder vendors only the metrics behind the 7 above (plus the validation
+gate). EVA's broader diagnostic metrics are not included, so there is no larger
+suite to opt into — `EVA_METRICS=all` resolves to this same reported set.
 
 <details>
 <summary><h2>Quick Start</h2></summary>
