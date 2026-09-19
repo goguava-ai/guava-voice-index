@@ -1,0 +1,297 @@
+"""Abstract base class for audio language model clients.
+
+Audio-LLM clients accept audio input + text context and return text output.
+Concrete implementations (vLLM-hosted models, Gemini, etc.) differ in auth,
+endpoint shape, and provider-specific request quirks, but share:
+
+- A common interface (build_audio_user_message, complete, transcribe)
+- Audio utilities (PCM resampling, WAV encoding)
+- Common numeric configuration (sample rate, retry policy, etc.)
+
+The methods used by the audio-LLM pipeline:
+
+- build_audio_user_message: serialize a chunk of PCM audio into a chat message
+- complete: chat completion with audio + text + tool support (used by AudioLLMAgenticSystem)
+- transcribe: transcription-only call (used by AudioTranscriptionProcessor for
+  logging and conversation history, since a regular multimodal LLM does not
+  surface a separate transcription stream)
+"""
+
+import base64
+import struct
+from abc import ABC, abstractmethod
+from typing import Any
+
+import litellm
+from pipecat.transcriptions.language import Language
+
+from eva.models.config import LANGUAGE_DISPLAY_NAMES
+from eva.utils.audio_utils import pcm16_to_wav_bytes
+
+# Default audio parameters (Ultravox: 16kHz PCM16 mono)
+DEFAULT_SAMPLE_RATE = 16000
+DEFAULT_NUM_CHANNELS = 1
+DEFAULT_SAMPLE_WIDTH = 2  # 16-bit PCM
+
+VALID_SAMPLE_RATES = {8000, 16000, 24000, 44100, 48000}
+
+# Default system prompt for audio-LLM transcription calls. Used by client
+# transcribe() implementations when no override is supplied, and by
+# AudioTranscriptionProcessor when no system_prompt is configured.
+DEFAULT_TRANSCRIPTION_PROMPT = """You are an audio transcriber. Your job is to transcribe the input audio to text exactly as it was said by the user.
+
+Rules:
+- Respond with an exact transcription of the audio input only.
+- Do not include any text other than the transcription.
+- Do not explain or add to your response.
+- Transcribe the audio input simply and precisely.
+- If the audio is not clear, respond with exactly: UNCLEAR"""
+
+
+def build_transcription_prompt(language: str | None = None) -> str:
+    """Return a transcription system prompt, optionally with a language hint.
+
+    Args:
+        language: BCP 47 language tag (e.g. 'en', 'fr', 'es'). When provided
+            and not 'en', a language hint is appended to the prompt so the
+            model knows what language to expect.
+    """
+    prompt = DEFAULT_TRANSCRIPTION_PROMPT
+    if language and language != "en":
+        display_name = LANGUAGE_DISPLAY_NAMES.get(Language(language), language)
+        prompt += f"\n- The audio is primarily in {display_name}. Transcribe in that language."
+    return prompt
+
+
+def resample_pcm16(pcm_data: bytes, from_rate: int, to_rate: int) -> bytes:
+    """Resample PCM16 mono audio via linear interpolation."""
+    if from_rate == to_rate:
+        return pcm_data
+    num_samples = len(pcm_data) // 2
+    if num_samples == 0:
+        return pcm_data
+    samples = struct.unpack(f"<{num_samples}h", pcm_data)
+    ratio = to_rate / from_rate
+    out_count = int(num_samples * ratio)
+    out_samples = []
+    for i in range(out_count):
+        src_idx = i / ratio
+        idx0 = int(src_idx)
+        idx1 = min(idx0 + 1, num_samples - 1)
+        frac = src_idx - idx0
+        val = int(samples[idx0] * (1 - frac) + samples[idx1] * frac)
+        val = max(-32768, min(32767, val))
+        out_samples.append(val)
+    return struct.pack(f"<{len(out_samples)}h", *out_samples)
+
+
+# Keys litellm.stream_chunk_builder itself understands when merging a streamed
+# tool_call delta (see get_combined_tool_content in
+# litellm/litellm_core_utils/streaming_chunk_builder_utils.py). Anything else a
+# provider puts on the delta gets silently dropped during reassembly. This bites
+# Gemini's raw OpenAI-compatible endpoint (used directly by ALMGeminiClient,
+# bypassing litellm's own Gemini transport): it carries the thought signature
+# required for multi-turn function calling under an `extra_content` key that
+# litellm's merge doesn't recognize. CASCADE's LiteLLMClient doesn't hit this
+# because it talks to Gemini through litellm's native transport, which stamps
+# signatures onto `provider_specific_fields` itself before chunks reach here.
+_KNOWN_STREAMED_TOOL_CALL_KEYS = {"id", "type", "function", "index", "provider_specific_fields"}
+
+
+def _merge_streamed_tool_call_extras(dict_chunks: list[dict]) -> list[Any] | None:
+    """Rebuild tool_calls from raw stream chunks, preserving extra keys.
+
+    E.g. Gemini's `extra_content`, that litellm.stream_chunk_builder's merge drops.
+    Returns None if no such extra keys are present anywhere in the chunks (the
+    common case for other providers), so the caller can leave litellm's own
+    reconstruction untouched.
+    """
+    tool_call_map: dict[int, dict[str, Any]] = {}
+    for chunk in dict_chunks:
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            for tc in delta.get("tool_calls") or []:
+                if not isinstance(tc, dict):
+                    continue
+                index = tc.get("index", 0)
+                entry = tool_call_map.setdefault(
+                    index, {"id": None, "type": None, "name": None, "arguments": [], "extra": {}}
+                )
+                if tc.get("id"):
+                    entry["id"] = tc["id"]
+                if tc.get("type"):
+                    entry["type"] = tc["type"]
+                function = tc.get("function") or {}
+                if function.get("name"):
+                    entry["name"] = function["name"]
+                if function.get("arguments"):
+                    entry["arguments"].append(function["arguments"])
+                for key, value in tc.items():
+                    if key not in _KNOWN_STREAMED_TOOL_CALL_KEYS and value is not None:
+                        entry["extra"][key] = value
+
+    if not any(entry["extra"] for entry in tool_call_map.values()):
+        return None
+
+    from litellm.types.utils import ChatCompletionMessageToolCall, Function
+
+    tool_calls = []
+    for index in sorted(tool_call_map):
+        entry = tool_call_map[index]
+        if not (entry["id"] and entry["name"]):
+            continue
+        tc_obj = ChatCompletionMessageToolCall(
+            id=entry["id"],
+            type=entry["type"] or "function",
+            function=Function(name=entry["name"], arguments="".join(entry["arguments"]) or "{}"),
+        )
+        for key, value in entry["extra"].items():
+            setattr(tc_obj, key, value)
+        tool_calls.append(tc_obj)
+    return tool_calls or None
+
+
+def _assemble_stream_chunks(chunks: list, messages: list[dict[str, Any]]) -> tuple[Any, Any, str]:
+    """Reconstruct the final message from raw OpenAI-SDK stream chunks.
+
+    Delegates to litellm.stream_chunk_builder — the same assembler CASCADE's
+    LiteLLMClient.complete_stream uses (see services/llm.py) — so both pipelines
+    share one chunk-assembly implementation. It expects dict-shaped chunks, so
+    pydantic chunks from the raw AsyncOpenAI client are dumped first.
+
+    Returns (message, usage, finish_reason). ``message`` has real
+    ``.content`` / ``.tool_calls[i].function.name/arguments`` / ``model_dump()``
+    attributes, matching what AgenticSystem._run_tool_loop expects.
+    """
+    dict_chunks = [c.model_dump() if hasattr(c, "model_dump") else c for c in chunks]
+    full = litellm.stream_chunk_builder(dict_chunks, messages=messages)
+    message = full.choices[0].message
+    # See _merge_streamed_tool_call_extras: litellm's own merge drops provider-
+    # specific extra keys (e.g. Gemini's extra_content.thought_signature).
+    # Rebuild tool_calls ourselves when present so the field survives into the
+    # message handed back to AgenticSystem._run_tool_loop.
+    merged_tool_calls = _merge_streamed_tool_call_extras(dict_chunks)
+    if merged_tool_calls is not None:
+        message.tool_calls = merged_tool_calls
+    usage = getattr(full, "usage", None)
+    finish_reason = getattr(full.choices[0], "finish_reason", None) or "unknown"
+    return message, usage, finish_reason
+
+
+class BaseALMClient(ABC):
+    """Common interface and shared behavior for audio-LLM clients."""
+
+    def __init__(
+        self,
+        model: str,
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        max_retries: int = 5,
+        initial_delay: float = 1.0,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
+        num_channels: int = DEFAULT_NUM_CHANNELS,
+        sample_width: int = DEFAULT_SAMPLE_WIDTH,
+        language: str | None = None,
+    ):
+        if sample_rate not in VALID_SAMPLE_RATES:
+            raise ValueError(f"Invalid sample_rate={sample_rate}. Must be one of {sorted(VALID_SAMPLE_RATES)}")
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.max_retries = max_retries
+        self.initial_delay = initial_delay
+        self.sample_rate = sample_rate
+        self.num_channels = num_channels
+        self.sample_width = sample_width
+        self.default_transcription_prompt = build_transcription_prompt(language)
+
+    def _audio_to_b64_wav(self, audio_bytes: bytes, source_sample_rate: int) -> str:
+        """Resample, WAV-wrap, and base64-encode raw PCM16 audio."""
+        resampled = resample_pcm16(audio_bytes, source_sample_rate, self.sample_rate)
+        wav_bytes = pcm16_to_wav_bytes(
+            resampled,
+            sample_rate=self.sample_rate,
+            num_channels=self.num_channels,
+            sample_width=self.sample_width,
+        )
+        return base64.b64encode(wav_bytes).decode("utf-8")
+
+    def build_audio_user_message(
+        self,
+        audio_bytes: bytes,
+        source_sample_rate: int,
+        text_hint: str = "",
+    ) -> dict[str, Any]:
+        """Build a user message with audio content.
+
+        Provider-specific shape comes from the subclass _audio_content_part hook.
+        """
+        audio_b64 = self._audio_to_b64_wav(audio_bytes, source_sample_rate)
+        content: list[dict[str, Any]] = []
+        if text_hint:
+            content.append({"type": "text", "text": text_hint})
+        content.append(self._audio_content_part(audio_b64))
+        return {"role": "user", "content": content}
+
+    @staticmethod
+    def _is_retryable(error: Exception) -> bool:
+        """Check if an error is retryable (connection, timeout, server errors)."""
+        error_str = str(error).lower()
+        retryable_patterns = [
+            "connection",
+            "timeout",
+            "502",
+            "503",
+            "504",
+            "rate limit",
+            "too many requests",
+            "server error",
+        ]
+        return any(pattern in error_str for pattern in retryable_patterns)
+
+    @abstractmethod
+    def _audio_content_part(self, audio_b64: str) -> dict[str, Any]:
+        """Return the provider-specific content dict for a base64-WAV audio blob."""
+
+    @abstractmethod
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Chat completion with audio and tool support.
+
+        Returns (message_or_content, stats_dict). When tool_calls are present
+        on the response, returns the full message object; otherwise returns
+        the content string.
+        """
+
+    async def complete_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None = None,
+    ):
+        """Yield text deltas then the assembled final message and stats.
+
+        Default implementation falls back to complete() for providers that
+        don't support streaming. Subclasses should override for true streaming.
+
+        Yields tuples of ("delta", text_chunk) for each text delta, then
+        ("final", (message, stats)) once when the response is complete.
+        """
+        message_or_content, stats = await self.complete(messages, tools=tools)
+        if isinstance(message_or_content, str) and message_or_content:
+            yield ("delta", message_or_content)
+        yield ("final", (message_or_content, stats))
+
+    @abstractmethod
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        source_sample_rate: int,
+        system_prompt: str | None = None,
+    ) -> str | None:
+        """Transcribe a chunk of PCM16 audio to text.
+
+        Returns the transcript, or None on error / empty audio.
+        """
