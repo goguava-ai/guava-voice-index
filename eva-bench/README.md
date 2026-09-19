@@ -72,8 +72,8 @@ three feed EVA-X (Experience) — together they supply every component of EVA's
 | **Response Speed** | Diagnostic | `response_speed` | Deterministic |
 
 > Every one of these metrics is EVA's. See EVA's
-> [Metrics documentation](docs/metrics/README.md) for the detailed scoring
-> rubrics and judge prompts, and [MetricContext documentation](docs/metric_context.md)
+> [Metrics documentation](https://github.com/ServiceNow/eva/blob/main/docs/metrics/README.md) for the detailed scoring
+> rubrics and judge prompts, and [MetricContext documentation](https://github.com/ServiceNow/eva/blob/main/docs/metric_context.md)
 > for the data structures they operate on.
 
 EVA's **validation gates** (`conversation_valid_end`, `user_behavioral_fidelity`,
