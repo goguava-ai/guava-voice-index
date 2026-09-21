@@ -1,6 +1,7 @@
 ## Guava Voice Index (GVI)
 
-### Composite Scoring Framework v1.0 | September 2026
+### Composite Scoring Framework 
+v1.0 | September 2026
 
 The Guava Voice Index (GVI) is a 0-100 composite score for voice agent quality. It combines automated metrics from open-source frameworks (EVA-Bench and CoVAL) with blind human evaluations scored by a third-party evaluation panel across five pillars.
 
