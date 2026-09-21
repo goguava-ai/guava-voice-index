@@ -81,7 +81,18 @@ Perceptual voice quality. Human eval is the primary signal.
 
 ---
 
-## 4. Validation Gates
+## 4. Evaluation Protocol
+
+### 4.1 Automated
+
+The GVI pulls from two open-source frameworks:
+
+- **EVA-Bench** provides metrics for task completion, conversation progression, turn-taking, conciseness, faithfulness, agent speech fidelity, and latency through bot-to-bot audio evaluation across enterprise scenarios.
+- **CoVAL** provides speech recognition word error rate.
+
+> **Note:** The latency submetric is log-normalized from raw metrics to keep the total possible score at 100 and the minimum at 0. All other automated submetrics are scored 0 or 1.
+
+#### Validation Gates
 
 Scenarios must pass all gates before contributing to scores. Failed gate = scenario discarded.
 
@@ -91,53 +102,21 @@ Scenarios must pass all gates before contributing to scores. Failed gate = scena
 | conversation_valid_end  | Call ended with proper end_call             | >= 0.5    |
 | user_speech_fidelity    | User simulator spoke correctly             | >= 2.0    |
 
----
+### 4.2 Human
 
-## 5. Duplication Avoidance
-
-Each concept is assigned to exactly one pillar to prevent double-counting.
-
-| Concept                 | Assigned To        | Not In          | Why                                      |
-|:------------------------|:-------------------|:----------------|:-----------------------------------------|
-| Interruption handling   | Conversational Flow | Responsiveness | Judgment, not speed                       |
-| agent_speech_fidelity   | Fidelity           | TTS Quality     | Word correctness, not naturalness         |
-| conciseness             | Conversational Flow | Resolution     | Conversational dynamics, not task outcome |
-| conversation_progression | Resolution         | Conversational Flow | Goal advancement, not timing          |
-| stt_wer                 | Fidelity           | Resolution      | Input accuracy, not task outcome          |
-| speakability            | TTS Quality        | Fidelity        | Voice-friendliness, not content truth     |
-
----
-
-## 6. Human Evaluation Protocol
+All human metrics are collected through blind pairwise A/B tests run by an independent third-party evaluator panel. Evaluators compare systems against live human agents handling the same calls through both audio listening tests and transcript reviews. Minimum 10 evaluators per pair.
 
 **Perceived Responsiveness (Pillar 1)**
-Pairwise A/B test. Evaluators pick which agent feels faster and more responsive. Min 10 evaluators per pair. Vetted evaluator panel.
+Evaluators pick which agent feels faster and more responsive.
 
 **Interruption Score (Pillar 2)**
-Pairwise A/B test. Evaluators pick which agent more naturally recovered from the interruption. Min 10 evaluators per pair. Vetted evaluator panel.
+Evaluators pick which agent more naturally recovered from the interruption.
 
 **Content Relevance (Pillar 2)**
-Pairwise A/B test. Evaluators pick which agent's dialog more naturally suited the conversation dynamics. Min 10 evaluators per pair. Vetted evaluator panel.
+Evaluators pick which agent's dialog more naturally suited the conversation dynamics.
 
 **TTS Quality (Pillar 5)**
-Pairwise A/B test. Evaluators pick which agent voice sounds more natural. Min 10 evaluators per pair. Vetted evaluator panel.
-
----
-
-## 7. Methodology
-
-### Automated Layer
-
-The GVI pulls from two open-source frameworks:
-
-- **EVA-Bench** provides metrics for task completion, conversation progression, turn-taking, conciseness, faithfulness, agent speech fidelity, and latency through bot-to-bot audio evaluation across enterprise scenarios.
-- **CoVAL** provides speech recognition word error rate.
-
-> **Note:** The latency submetric is log-normalized from raw metrics to keep the total possible score at 100 and the minimum at 0. All other automated submetrics are scored 0 or 1.
-
-### Human Evaluation Layer
-
-The human layer is a blind pairwise evaluation run by a third-party evaluation panel. Evaluators compare systems against live human agents handling the same calls through both audio listening tests and transcript reviews. This produces the perceived responsiveness, interruption handling, content relevance, and TTS quality submetrics.
+Evaluators pick which agent voice sounds more natural.
 
 ---
 
