@@ -113,3 +113,11 @@ Evaluators pick which agent voice sounds more natural.
 ## Submission
 
 To submit a voice agent system for GVI evaluation, visit [WEBSITE URL].
+
+--
+
+## References & Acknowledgments
+
+This project utilizes the following open-source agent evaluation benchmarks:
+* **[EVA Framework](https://github.com/ServiceNow/eva)** (v0.1.1) — An end-to-end framework developed by ServiceNow Research for evaluating conversational voice agents across task accuracy and user experience.
+* **[Coval Voice AI Benchmarks](https://github.com/coval-ai/benchmarks) - Public, open-source voice-AI benchmarking for STT and TTS providers. 
