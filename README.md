@@ -1,18 +1,8 @@
 # Guava Voice Index (GVI)
 
-## Composite Scoring Framework
+## Composite Scoring Framework v1.0 | September 2026
 
-v1.0 | September 2026
-
----
-
-## 1. Overview
-
-The GVI is a 0-100 composite score for voice agent quality. It combines automated metrics from open-source frameworks (EVA-Bench and CoVAL) with blind human evaluations scored by a third-party evaluation panel across five pillars. Content correctness accounts for 60% of the score; voice experience accounts for 40%.
-
----
-
-## 2. Composite Formula
+The Guava Voice Index (GVI) is a 0-100 composite score for voice agent quality. It combines automated metrics from open-source frameworks (EVA-Bench and CoVAL) with blind human evaluations scored by a third-party evaluation panel across five pillars.
 
 ```
 GVI = 10 × Responsiveness + 15 × Conversational Flow + 30 × Fidelity + 30 × Resolution + 15 × TTS Quality
@@ -20,7 +10,7 @@ GVI = 10 × Responsiveness + 15 × Conversational Flow + 30 × Fidelity + 30 × 
 
 ---
 
-## 3. Pillar Definitions
+## Pillar Definitions
 
 | Pillar                  | Weight | Category   | Primary Signal                         |
 |:------------------------|:------:|:-----------|:---------------------------------------|
@@ -32,7 +22,7 @@ GVI = 10 × Responsiveness + 15 × Conversational Flow + 30 × Fidelity + 30 × 
 
 ---
 
-### 3.1 Responsiveness (10 pts)
+### Responsiveness (10 pts)
 
 Pure speed: time from caller done speaking to agent audio. Floor = 0.3s (perfect), ceiling = 4.0s (zero).
 
@@ -81,9 +71,9 @@ Perceptual voice quality. Human eval is the primary signal.
 
 ---
 
-## 4. Evaluation Protocol
+## Evaluation Protocol
 
-### 4.1 Automated
+### Automated Eval Protocol
 
 The GVI pulls from two open-source frameworks:
 
@@ -102,20 +92,20 @@ Scenarios must pass all gates before contributing to scores. Failed gate = scena
 | conversation_valid_end  | Call ended with proper end_call             | >= 0.5    |
 | user_speech_fidelity    | User simulator spoke correctly             | >= 2.0    |
 
-### 4.2 Human
+### Human Eval Protocol
 
 All human metrics are collected through blind pairwise A/B tests run by an independent third-party evaluator panel. Evaluators compare systems against live human agents handling the same calls through both audio listening tests and transcript reviews. Minimum 10 evaluators per pair.
 
-**Perceived Responsiveness (Pillar 1)**
+**Perceived Responsiveness**
 Evaluators pick which agent feels faster and more responsive.
 
-**Interruption Score (Pillar 2)**
+**Interruption Score**
 Evaluators pick which agent more naturally recovered from the interruption.
 
-**Content Relevance (Pillar 2)**
+**Content Relevance**
 Evaluators pick which agent's dialog more naturally suited the conversation dynamics.
 
-**TTS Quality (Pillar 5)**
+**TTS Quality**
 Evaluators pick which agent voice sounds more natural.
 
 ---
