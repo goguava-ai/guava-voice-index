@@ -1,0 +1,34 @@
+{
+  "name": "East Campus",
+  "translatable": true,
+  "base": [
+    "east campus"
+  ],
+  "translations": {
+    "fr": [
+      "campus est",
+      "site est"
+    ],
+    "fr-CA": [
+      "campus est",
+      "site est"
+    ],
+    "es": [
+      "campus del este",
+      "campus este"
+    ],
+    "de": [
+      "campus ost",
+      "ostcampus"
+    ],
+    "hi": [
+      "ईस्ट कैंपस",
+      "पूर्वी कैंपस"
+    ],
+    "ko": [
+      "동쪽 캠퍼스",
+      "동캠퍼스",
+      "이스트 캠퍼스"
+    ]
+  }
+}

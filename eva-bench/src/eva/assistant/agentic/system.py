@@ -1,0 +1,533 @@
+"""Agentic system - orchestrates interaction between users and a single agent."""
+
+import asyncio
+import csv
+import json
+import time
+import warnings
+from collections.abc import AsyncGenerator
+from pathlib import Path
+from typing import Any
+
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
+
+from eva.assistant.agentic.audit_log import (
+    AuditLog,
+    ConversationMessage,
+    LLMCall,
+    MessageRole,
+)
+from eva.assistant.tools.tool_executor import ToolExecutor, execute_and_log_tool
+from eva.models.agents import AgentConfig
+from eva.utils.conversation_checks import LLM_GENERIC_ERROR_MESSAGE as GENERIC_ERROR
+from eva.utils.error_handler import categorize_error
+from eva.utils.log_processing import truncate_data_uris
+from eva.utils.logging import get_logger
+from eva.utils.prompt_manager import PromptManager
+
+logger = get_logger(__name__)
+
+# Suppress LiteLLM's Pydantic serialization warnings (harmless internal warnings)
+warnings.filterwarnings("ignore", category=UserWarning, message=".*Pydantic serializer warnings.*")
+
+
+def _clean_tool_name(name: str) -> str:
+    """Strip Harmony special tokens that leak into tool names due to a known vLLM bug.
+
+    vLLM's openai tool-call parser does not always correctly handle the Harmony
+    chat template's <|channel|> delimiters, causing tokens like
+    '<|channel|>commentary' to be appended to the tool name intermittently.
+    See: https://github.com/vllm-project/vllm/issues/32587
+    """
+    if "<|channel|>" in name:
+        cleaned = name.split("<|channel|>")[0].strip()
+        logger.warning(f"Harmony token leak in tool name: {name!r} → {cleaned!r}")
+        return cleaned
+    return name
+
+
+def _pair_orphaned_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add neutral tool results for tool calls left unanswered by interruption or transfer paths."""
+    repaired: list[dict[str, Any]] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+        repaired.append(msg)
+        tool_calls = msg.get("tool_calls") if msg.get("role") == "assistant" else None
+        if tool_calls:
+            call_ids = [
+                cid for tc in tool_calls if isinstance(tc, dict) and isinstance((cid := tc.get("id")), str) and cid
+            ]
+            answered: set[str] = set()
+            j = i + 1
+            while j < n and messages[j].get("role") == "tool":
+                repaired.append(messages[j])
+                if isinstance(tool_call_id := messages[j].get("tool_call_id"), str):
+                    answered.add(tool_call_id)
+                j += 1
+            for cid in call_ids:
+                if cid not in answered:
+                    logger.warning(
+                        f"Pairing orphaned tool_call {cid} with a synthetic result (interrupted/transferred)"
+                    )
+                    repaired.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": cid,
+                            "content": json.dumps(
+                                {"status": "no_result", "note": "tool result unavailable (interrupted or transferred)"}
+                            ),
+                        }
+                    )
+            i = j
+            continue
+        i += 1
+    return repaired
+
+
+class AgenticSystem:
+    """Orchestrates the interaction between users and a single agent.
+
+    Single-agent mode: directly executes the configured agent without matching.
+
+    The system handles:
+    - Agent execution (running the agent with tool calls)
+    - Conversation state management
+    """
+
+    def __init__(
+        self,
+        current_date_time: str,
+        agent: AgentConfig,
+        tool_handler: ToolExecutor,
+        audit_log: AuditLog,
+        llm_client: Any,  # LLM client for model calls
+        output_dir: Path | None = None,  # Output directory for performance stats
+        pre_tool_speech: str = "off",
+        llm_streaming: bool = False,
+        assistant_gender: str | None = None,
+    ):
+        """Initialize the agentic system.
+
+        Args:
+            current_date_time: Current date and time string for prompt
+            agent: Single agent configuration to use for all interactions
+            tool_handler: Handler for tool calls (ToolExecutor)
+            audit_log: Audit log for conversation tracking
+            llm_client: Client for LLM calls
+            output_dir: Optional output directory for saving performance stats
+            pre_tool_speech: Lead-in mode ('off'|'auto')
+            llm_streaming: Stream LLM output sentence-by-sentence
+            assistant_gender: Speaking gender for the assistant ('M'|'F'); None adds no
+                gender instruction (for gender-neutral languages like English)
+        """
+        self.agent = agent
+        self.tool_handler = tool_handler
+        self.audit_log = audit_log
+        self.llm_client = llm_client
+        self.output_dir = output_dir
+        self.current_date_time = current_date_time
+        self.pre_tool_speech = pre_tool_speech
+        self.llm_streaming = llm_streaming
+        self.assistant_gender = assistant_gender
+        self._warned_responses_streaming_fallback = False
+
+        self.prompt_manager = PromptManager()
+
+        # Track agent performance stats
+        self.agent_perf_stats: list[dict[str, Any]] = []
+
+        # Build the agent prompt
+        self.system_prompt = self.prompt_manager.get_prompt(
+            "agent.system_prompt",
+            agent_personality=agent.description,
+            agent_instructions=agent.instructions,
+            datetime=self.current_date_time,
+        )
+        if self.pre_tool_speech == "auto":
+            self.system_prompt += "\n\n" + self.prompt_manager.get_prompt("agent.pre_tool_speech")
+        if self.assistant_gender is not None:
+            gender_word = "male" if self.assistant_gender == "M" else "female"
+            self.system_prompt += "\n\n" + self.prompt_manager.get_prompt(
+                "agent.gender_instruction", gender_word=gender_word
+            )
+        # Build tools for the LLM
+        self.tools = agent.build_tools_for_agent()
+
+    def _record_partial_streamed_output(self, chunks: list[str], reason: str) -> None:
+        partial = " ".join(chunk.strip() for chunk in chunks if chunk.strip())
+        if not partial:
+            return
+        logger.info(f"Recording partial streamed assistant output after {reason}")
+        self.audit_log.append_assistant_output(partial)
+
+    async def process_query(self, query: str, log_user_input: bool = True) -> AsyncGenerator[str, None]:
+        """Process a user query and yield response messages.
+
+        This is the main entry point for handling user input.
+        Directly executes the configured agent without matching.
+
+        Args:
+            query: User's input text
+            log_user_input: Whether to record `query` as a user_input audit log entry.
+                Set to False when the caller already logged its own marker entry for this
+                turn (e.g. a turn-end fallback nudge) and only wants the LLM call driven
+                by `query` without a duplicate audit log entry.
+
+        Yields:
+            Text responses to be sent to TTS
+        """
+        logger.info(f"Processing query: {query}")
+
+        # Record user input
+        if log_user_input:
+            self.audit_log.append_user_input(query)
+
+        # Execute agent interaction
+        async for response in self._execute_agent(self.agent):
+            yield response
+
+    async def _execute_agent(
+        self,
+        agent: AgentConfig,
+    ) -> AsyncGenerator[str, None]:
+        """Execute an agent interaction with tool calling loop.
+
+        Args:
+            agent: Agent to execute
+
+        Yields:
+            Response messages
+        """
+        # Initial messages - start with system prompt
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+        ]
+        # Add conversation history (includes current query since we already called append_user_input)
+        conversation_history = self.audit_log.get_conversation_messages(max_messages=30)
+        messages.extend(msg.to_dict() for msg in conversation_history)
+        messages = _pair_orphaned_tool_calls(messages)
+
+        async for response in self._run_tool_loop(messages, agent):
+            yield response
+
+    async def _run_tool_loop(
+        self,
+        messages: list[dict[str, Any]],
+        agent: AgentConfig,
+    ) -> AsyncGenerator[str, None]:
+        """Core tool-calling loop. Calls the LLM, executes tool calls, and repeats.
+
+        Separated from _execute_agent() so subclasses can build custom message lists
+        (e.g. with audio content) and reuse the same tool-calling logic.
+
+        Args:
+            messages: Initial messages list (will be mutated with tool results).
+            agent: Agent configuration with tools.
+
+        Yields:
+            Response messages.
+        """
+        # Tool calling loop (no max iterations)
+        while True:
+            start_time = str(int(time.time() * 1000))
+            streamed_chunks: list[str] = []
+            try:
+                # Truncate data URIs for logging only (full audio stays in `messages`)
+                messages_for_log = truncate_data_uris(messages)
+                prompt_str = json.dumps(messages_for_log, indent=2, ensure_ascii=False)
+
+                content_streamed = False
+                use_responses_api = getattr(self.llm_client, "use_responses_api", False)
+                if self.llm_streaming and use_responses_api and not self._warned_responses_streaming_fallback:
+                    logger.warning(
+                        "llm_streaming is not supported for Responses API deployments; using non-streaming completion."
+                    )
+                    self._warned_responses_streaming_fallback = True
+
+                if self.llm_streaming and not use_responses_api:
+                    response = None
+                    llm_stats = {}
+                    delta_count = 0
+                    aggregator = SimpleTextAggregator()
+                    async for kind, payload in self.llm_client.complete_stream(messages, tools=self.tools):
+                        if kind == "delta":
+                            delta_count += 1
+                            async for agg in aggregator.aggregate(payload):
+                                content_streamed = True
+                                streamed_chunks.append(agg.text)
+                                yield agg.text
+                        else:
+                            response, llm_stats = payload
+                    # delta_count > 1 confirms the provider streamed token-by-token rather
+                    # than a client falling back to a single non-streaming chunk.
+                    logger.debug(f"llm_streaming: received {delta_count} raw delta(s) from complete_stream")
+                    remainder = await aggregator.flush()
+                    if remainder and remainder.text.strip():
+                        content_streamed = True
+                        streamed_chunks.append(remainder.text)
+                        yield remainder.text
+                else:
+                    response, llm_stats = await self.llm_client.complete(
+                        messages,
+                        tools=self.tools,
+                    )
+                end_time = str(int(time.time() * 1000))
+
+                # Convert tool calls to dicts if present and extract content as string
+                response_tool_calls = getattr(response, "tool_calls", []) or []
+                tool_calls_dicts = []
+                for tc in response_tool_calls:
+                    # Use model_dump() to preserve provider_specific_fields (e.g., Gemini thought signatures)
+                    tc_dict = tc.model_dump(exclude_none=True)
+                    # Apply tool name cleaning for Harmony token leak bug
+                    tc_dict["function"]["name"] = _clean_tool_name(tc_dict["function"]["name"])
+
+                    # Log if a Gemini thought signature is present, so it's visible that it will be
+                    # preserved for the next turn. LiteLLM-routed calls (CASCADE) surface it under
+                    # provider_specific_fields; ALMGeminiClient's raw OpenAI-compat calls to Gemini
+                    # surface it under extra_content (see alm_base._merge_streamed_tool_call_extras).
+                    provider_fields = tc_dict.get("provider_specific_fields") or {}
+                    extra_content = tc_dict.get("extra_content") or {}
+                    if provider_fields.get("thought_signature") or (
+                        isinstance(extra_content.get("google"), dict)
+                        and extra_content["google"].get("thought_signature")
+                    ):
+                        logger.info(
+                            "🔮 Gemini thought signature present in tool call (will be preserved for next turn)"
+                        )
+
+                    tool_calls_dicts.append(tc_dict)
+
+                response_content = getattr(response, "content", "") or (response if isinstance(response, str) else "")
+                if response_content:
+                    response_content = response_content.strip()
+
+                response_tool_calls_for_stats = (
+                    [
+                        {"name": tool["function"]["name"], "arguments": tool["function"]["arguments"]}
+                        for tool in tool_calls_dicts
+                    ]
+                    if tool_calls_dicts
+                    else None
+                )
+
+                # Store performance stats
+                reasoning_content_for_csv = llm_stats.get("reasoning_content") or ""
+                reasoning_tokens = llm_stats.get("reasoning_tokens", 0) or 0
+
+                # Log if reasoning tokens are present but no reasoning content
+                if reasoning_tokens > 0 and not reasoning_content_for_csv:
+                    logger.debug(
+                        f"⚠️ Model used {reasoning_tokens} reasoning tokens but did not return thinking blocks."
+                    )
+
+                perf_stat = {
+                    "prompt": prompt_str,
+                    "response": response_content,
+                    "prompt_tokens": llm_stats.get("prompt_tokens", 0),
+                    "output_tokens": llm_stats.get("completion_tokens", 0),
+                    "cost": llm_stats.get("cost", 0.0),
+                    "cost_source": llm_stats.get("cost_source", "unknown"),
+                    "stop_reason": llm_stats.get("finish_reason", "unknown"),
+                    "latency": llm_stats.get("latency", 0.0),
+                    "parameters": json.dumps(llm_stats.get("parameters", {}), ensure_ascii=False),
+                    "tool_calls": json.dumps(response_tool_calls_for_stats, ensure_ascii=False)
+                    if response_tool_calls_for_stats
+                    else "",
+                    "reasoning": reasoning_content_for_csv or None,
+                    "reasoning_tokens": reasoning_tokens,
+                }
+                self.agent_perf_stats.append(perf_stat)
+                logger.debug(
+                    f"Collected agent perf stat: tokens={perf_stat['prompt_tokens']}/{perf_stat['output_tokens']}, stop_reason={perf_stat['stop_reason']}"
+                )
+
+                llm_call_response = ConversationMessage(
+                    role=MessageRole.ASSISTANT,
+                    content=response_content,
+                    tool_calls=tool_calls_dicts or None,
+                    reasoning=llm_stats.get("reasoning_content"),
+                )
+
+                llm_call = LLMCall(
+                    messages=messages_for_log,
+                    tools=self.tools,
+                    response=llm_call_response,
+                    start_time=start_time,
+                    end_time=end_time,
+                    duration_seconds=(int(end_time) - int(start_time)) / 1000.0,
+                    status="success",
+                    model=getattr(response, "model", None),
+                    latency_ms=float(int(end_time) - int(start_time)),
+                )
+
+                self.audit_log.append_llm_call(llm_call, agent_name=agent.name)
+
+            except asyncio.CancelledError:
+                # Pipeline is shutting down - log at debug and exit gracefully
+                self._record_partial_streamed_output(streamed_chunks, "cancellation")
+                logger.debug("LLM call cancelled during pipeline shutdown")
+                return  # Don't yield error message, just exit
+            except Exception as e:
+                # Check if this is a real error or a cancellation-related error
+                error_msg = str(e).strip()
+                # Cancellation errors often show as "APIError - " with no details
+                if error_msg.endswith("APIError -") or error_msg.endswith("APIError"):
+                    # Likely a cancellation-related error (no error details)
+                    logger.debug(f"LLM call failed during shutdown: {e}")
+                else:
+                    # Real API error with details - log and yield error
+                    logger.error(f"LLM call failed in agent execution: {e}")
+
+                    # Categorize error using centralized error handler
+                    error_info = categorize_error(e)
+                    error_type = error_info.error_type
+                    error_source = error_info.error_source
+
+                    # Create failed LLM call record
+                    end_time_failed = str(int(time.time() * 1000))
+                    failed_llm_call = LLMCall(
+                        messages=messages_for_log,
+                        tools=self.tools,
+                        response=None,
+                        start_time=start_time,
+                        end_time=end_time_failed,
+                        duration_seconds=(int(end_time_failed) - int(start_time)) / 1000.0,
+                        status="error",
+                        model=None,
+                        latency_ms=float(int(end_time_failed) - int(start_time)),
+                        error_type=error_type,
+                        error_source=error_source,
+                        retry_attempt=0,
+                    )
+                    self.audit_log.append_llm_call(failed_llm_call, agent_name=agent.name)
+                    if streamed_chunks:
+                        self._record_partial_streamed_output(streamed_chunks, "streaming failure")
+                    else:
+                        yield GENERIC_ERROR
+                return
+
+            if response_content and not content_streamed:
+                logger.info(f"💬 Assistant LLM response: {response_content}")
+                yield response_content
+
+            reasoning_content = llm_stats.get("reasoning_content") or llm_stats.get("reasoning")
+            self.audit_log.append_assistant_output(
+                content=response_content, tool_calls=tool_calls_dicts or None, reasoning=reasoning_content
+            )
+
+            if not tool_calls_dicts:
+                # No tool calls, this is the final response
+                return
+
+            # Build assistant message - include thinking blocks for Anthropic if present
+            assistant_msg = {
+                "role": "assistant",
+                "content": response_content,
+                "tool_calls": tool_calls_dicts,
+            }
+            thinking_blocks = llm_stats.get("thinking_blocks")
+            if thinking_blocks:
+                assistant_msg["thinking_blocks"] = thinking_blocks
+                logger.info(f"🧠 Including {len(thinking_blocks)} thinking block(s) in message history for next turn")
+            responses_output_items = llm_stats.get("responses_output_items")
+            if responses_output_items:
+                assistant_msg["responses_output_items"] = responses_output_items
+                logger.info(f"🔮 Including {len(responses_output_items)} responses output item(s) for next turn")
+            messages.append(assistant_msg)
+
+            # Execute each tool call
+            for tool_call in response_tool_calls:
+                tool_name = _clean_tool_name(tool_call.function.name)
+                try:
+                    # TODO Consider this a model error instead of handling this gracefully
+                    params = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    params = {}
+
+                # Log tool call
+                logger.info(f"🔧 Tool call: {tool_name}")
+                logger.info(f"   Parameters: {json.dumps(params, indent=2, ensure_ascii=False)}")
+
+                # Special handling for transfer to live agent
+                if tool_name == "transfer_to_agent":
+                    transfer_message = "Transferring you to a live agent. Please wait."
+                    self.audit_log.append_tool_call(
+                        tool_name=tool_name,
+                        parameters=params,
+                        response={"status": "transfer_initiated"},
+                    )
+
+                    logger.info(f"🔀 Transfer initiated: {transfer_message}")
+                    yield transfer_message
+                    self.audit_log.append_assistant_output(transfer_message, reasoning=reasoning_content)
+                    return
+
+                result = await execute_and_log_tool(self.tool_handler, self.audit_log, tool_name, params)
+
+                if result.get("status") == "error":
+                    logger.warning(f"❌ Tool error: {tool_name} - {result.get('message', 'Unknown error')}")
+                else:
+                    logger.info(f"✅ Tool response: {tool_name}")
+                    logger.info(f"   Result: {json.dumps(result, indent=2, ensure_ascii=False)}")
+
+                # Add tool response to messages
+                tool_content = json.dumps(result, ensure_ascii=False)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_content,
+                    }
+                )
+
+                self.audit_log.append_tool_message(tool_call_id=tool_call.id, content=tool_content)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get conversation statistics."""
+        stats = self.audit_log.get_stats()
+        stats["agent"] = self.agent.name
+        return stats
+
+    def save_agent_perf_stats(self) -> None:
+        """Save agent performance stats to CSV file."""
+        logger.info(
+            f"save_agent_perf_stats called: output_dir={self.output_dir}, stats_count={len(self.agent_perf_stats)}"
+        )
+
+        if not self.output_dir:
+            logger.warning("No output_dir set, skipping agent perf stats save")
+            return
+
+        if not self.agent_perf_stats:
+            logger.warning("No agent perf stats collected, skipping save")
+            return
+
+        csv_path = Path(self.output_dir) / "agent_perf_stats.csv"
+
+        try:
+            # Write to CSV
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                fieldnames = [
+                    "prompt",
+                    "response",
+                    "prompt_tokens",
+                    "output_tokens",
+                    "cost",
+                    "cost_source",
+                    "stop_reason",
+                    "parameters",
+                    "tool_calls",
+                    "latency",
+                    "reasoning",
+                    "reasoning_tokens",
+                ]
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(self.agent_perf_stats)
+
+            logger.info(f"Saved {len(self.agent_perf_stats)} agent performance stats to {csv_path}")
+        except Exception as e:
+            logger.error(f"Failed to save agent performance stats: {e}", exc_info=True)
