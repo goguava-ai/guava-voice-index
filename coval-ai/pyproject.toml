@@ -1,0 +1,25 @@
+[project]
+name = "coval-ai-stt-wer"
+version = "0.1.0"
+description = "Standalone STT WER harness for guava daytona-stt, vendored from coval-benchmarks."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+
+dependencies = [
+    # WER metric
+    "jiwer>=3.0",
+    "whisper-normalizer>=0.0.10",
+    # config / data models
+    "pydantic>=2.7",
+    "pydantic-settings>=2.14.2",
+    "structlog>=24",
+    # guava daytona-stt websocket adapter
+    "websockets>=13,<14",
+    # dataset fetch from the public GCS bucket
+    "google-cloud-storage>=2.18",
+]
+
+[tool.uv]
+# `coval_bench/` is vendored source run in place (via `uv run python run_stt_wer.py`),
+# not built/installed as a wheel, so don't treat this project as a package.
+package = false
