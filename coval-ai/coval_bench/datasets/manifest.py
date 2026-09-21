@@ -1,0 +1,97 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Vendored from coval-benchmarks (the coval runner package `coval_bench`).
+# Upstream path: runner/src/coval_bench/datasets/manifest.py
+# Kept verbatim except this note; re-sync from upstream rather than editing here.
+
+"""Pydantic models for coval-bench dataset manifests.
+
+Manifests are JSON files shipped inside the wheel under
+``coval_bench/datasets/manifests/``.  They are the SHA-pinned
+source of truth for a dataset version — the runner validates
+every downloaded file against the hash before use.
+
+Schema matches ARCHITECTURE.md § "GCS dataset bucket — manifest.json schema".
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class STTManifestItem(BaseModel):
+    """A single STT audio file entry in the manifest."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str = Field(min_length=1)  # relative path, e.g. "audio/0001.wav"
+    sample_id: str | None = Field(default=None, min_length=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    transcript: str
+    duration_sec: float = Field(gt=0)
+    speaker_id: str | None = None  # LibriSpeech provenance
+    chapter_id: str | None = None
+    utterance_id: str | None = None
+    speech_end_offset_ms: float | None = Field(default=None, ge=0)
+
+    @field_validator("sample_id")
+    @classmethod
+    def _sample_id_not_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("sample_id must be non-empty when provided")
+        return value
+
+
+class TTSManifestItem(BaseModel):
+    """A single TTS prompt entry in the manifest."""
+
+    model_config = ConfigDict(frozen=True)
+
+    testcase_id: str = Field(min_length=1)
+    transcript: str
+
+
+class Manifest(BaseModel):
+    """Top-level manifest object for a dataset version.
+
+    The ``items`` field is either a homogeneous list of
+    :class:`STTManifestItem` or :class:`TTSManifestItem`.
+    Mixed lists are rejected by the ``items_consistent`` validator.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str  # "stt-v1" or "tts-v1"
+    version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+    license: str  # "CC-BY-4.0" for STT, internal for TTS
+    source: str  # e.g. "LibriSpeech test-clean"
+    items: list[STTManifestItem | TTSManifestItem]
+
+    @model_validator(mode="after")
+    def items_consistent(self) -> Manifest:
+        """Ensure items are homogeneous and have distinct effective identities."""
+        if not self.items:
+            return self
+        first_type = type(self.items[0])
+        for item in self.items[1:]:
+            if type(item) is not first_type:
+                raise ValueError(
+                    f"Manifest '{self.id}' contains mixed item types: "
+                    f"expected all {first_type.__name__}, "
+                    f"found {type(item).__name__}"
+                )
+
+        identities: set[str] = set()
+        for item in self.items:
+            if isinstance(item, STTManifestItem):
+                identity = item.sample_id or item.path
+            else:
+                identity = item.testcase_id
+            if identity in identities:
+                raise ValueError(
+                    f"Manifest '{self.id}' contains duplicate effective sample identity: "
+                    f"{identity!r}"
+                )
+            identities.add(identity)
+        return self

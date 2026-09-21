@@ -1,7 +1,11 @@
-# Byte-compiled / optimized / DLL files
+# Python build / cache
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
 
 # C extensions
 *.so
@@ -45,6 +49,8 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Translations
 *.mo
@@ -62,6 +68,7 @@ venv.bak/
 # IDE
 .idea/
 .vscode/
+.zed/
 *.swp
 *.swo
 *~
@@ -69,6 +76,8 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
+.vercel
+node_modules
 
 # Project specific
 output/
@@ -78,6 +87,7 @@ logs/
 
 # Secrets (keep .env.example)
 .env
+.env.*
 !.env.example
 creds/
 
@@ -92,6 +102,10 @@ local/
 # Leaderboard generation (local only)
 scripts/leaderboard_runs.json
 scripts/extract_and_generate_leaderboard.py
+scripts.local/
+
+# Local-only markdown (never commit — use a .local.md suffix)
+**/*.local.md
 
 # Website data generation scripts (local only)
 website/scripts/
@@ -99,3 +113,9 @@ website/scripts/
 # Krisp VIVA SDK — licensed binaries, provisioned locally before Docker build (not public)
 vendor/krisp/*.whl
 vendor/krisp/*.kef
+
+# Node
+node_modules/
+
+# Local knowledge base (never commit)
+insights.md
