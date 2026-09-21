@@ -48,12 +48,13 @@ real STT behavior and turn-taking dynamics.
 
 ## Why this folder exists
 
-We run our own voice agent through EVA's bot-to-bot evaluation harness. Rather
-than reporting EVA's full metric suite, we report a **focused subset** of EVA
-metrics that matter most for our use case. The harness, dataset, user simulator,
+We run our own voice agent through EVA's bot-to-bot evaluation harness. The harness, dataset, user simulator,
 validation gates, and metric implementations are all EVA's; our additions are the
 runner that points EVA at our agent and the configuration that selects which EVA
 metrics to report.
+
+Our agent's results are published in [`guava_daytona_scores.json`](guava_daytona_scores.json) —
+per-domain and pooled scores for each EVA metric, reported as a point estimate with bootstrapped 95% confidence intervals. Notably, Daytona's performance (EVA-A pass@1: 0.638, EVA-X pass@1: 0.452) places it on the Pareto frontier.
 
 ## 📊 The EVA metrics we use
 
