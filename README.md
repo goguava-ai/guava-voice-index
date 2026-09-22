@@ -51,7 +51,7 @@ Content accuracy: did the agent say true things and render them correctly? Inclu
 |:--------------------- |:------------------------ |:-------------------- |:------:|
 | faithfulness          | EVA-A (LLM-as-Judge)     | 0-1                  |  0.50  |
 | agent_speech_fidelity | EVA-A (LALM-as-Judge)    | 0-1                  |  0.30  |
-| stt_wer               | Coval Voice AI Benchmark | % accuracy (1 - WER) |  0.20  |
+| stt_wer               | Coval Voice AI Benchmark | Word Error Rate      |  0.20  |
 
 #### Resolution (30 pts)
 
