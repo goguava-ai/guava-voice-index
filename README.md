@@ -113,7 +113,7 @@ Evaluators pick which agent voice sounds more natural.
 
 ### 📩 Submission
 
-To submit a voice agent system for GVI evaluation, visit [WEBSITE URL].
+To submit a voice agent system for GVI evaluation, visit http://goguava.ai/gvi.
 
 ---
 
