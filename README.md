@@ -3,7 +3,7 @@ v1.0 | September 2026
 
 ### 📐 Composite Scoring Framework 
 
-The Guava Voice Index (GVI) is a 0-100 composite score for voice agent quality. It combines automated metrics from open-source frameworks (EVA-Bench and CoVAL) with blind human evaluations scored by a third-party evaluation panel across five pillars.
+The Guava Voice Index (GVI) is a 0-100 composite score for voice agent quality. It combines automated metrics from open-source frameworks (EVA-Bench and Coval) with blind human evaluations scored by a third-party evaluation panel across five pillars.
 
 ```
 GVI = 10 × Responsiveness + 15 × Conversational Flow + 30 × Fidelity + 30 × Resolution + 15 × TTS Quality
@@ -51,7 +51,7 @@ Content accuracy: did the agent say true things and render them correctly? Inclu
 |:--------------------- |:------------------------ |:-------------------- |:------:|
 | faithfulness          | EVA-A (LLM-as-Judge)     | 0-1                  |  0.50  |
 | agent_speech_fidelity | EVA-A (LALM-as-Judge)    | 0-1                  |  0.30  |
-| stt_wer               | CoVAL Voice AI Benchmark | % accuracy (1 - WER) |  0.20  |
+| stt_wer               | Coval Voice AI Benchmark | % accuracy (1 - WER) |  0.20  |
 
 #### Resolution (30 pts)
 
@@ -79,7 +79,7 @@ Perceptual voice quality. Human eval is the primary signal.
 The GVI pulls from two open-source frameworks:
 
 - **EVA-Bench** provides metrics for task completion, conversation progression, turn-taking, conciseness, faithfulness, agent speech fidelity, and latency through bot-to-bot audio evaluation across enterprise scenarios.
-- **CoVAL** provides speech recognition word error rate.
+- **Coval** provides speech recognition word error rate.
 
 > **Note:** The latency submetric is log-normalized from raw metrics to keep the total possible score at 100 and the minimum at 0. All other automated submetrics are scored 0 or 1.
 
