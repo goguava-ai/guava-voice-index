@@ -13,19 +13,19 @@ GVI = 10 × Responsiveness + 15 × Conversational Flow + 30 × Fidelity + 30 × 
 
 ### 🏛️ Pillar Definitions
 
-| Pillar                  | Weight | Category   | Primary Signal                      |
-|:----------------------- |:------:|:---------- |:----------------------------------- |
-| **Responsiveness**      |   10   | Experience | How fast does it reply?             |
-| **Conversational Flow** |   15   | Experience | Does it know when to talk and stop? |
-| **Fidelity**            |   30   | Content    | Did it say true things?             |
-| **Resolution**          |   30   | Content    | Did the job get done?               |
-| **Speech Quality**      |   15   | Experience | Does it sound natural?              |
+| Pillar                  | Weight | Primary Signal                      |
+|:----------------------- |:------:|:----------------------------------- |
+| **Responsiveness**      |   10   | How fast does it reply?             |
+| **Conversational Flow** |   15   | Does it know when to talk and stop? |
+| **Fidelity**            |   30   | Did it say true things?             |
+| **Resolution**          |   30   | Did the job get done?               |
+| **Speech Quality**      |   15   | Does it sound natural?              |
 
 ---
 
 #### Responsiveness (10 pts)
 
-Pure speed: time from caller done speaking to agent audio. Floor = 0.3s (perfect), ceiling = 4.0s (zero).
+Pure speed: time from caller done speaking to agent audio.
 
 | Metric         | Source         | Scale                                | Weight |
 |:-------------- |:-------------- |:------------------------------------ |:------:|

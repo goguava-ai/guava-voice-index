@@ -198,8 +198,6 @@ your own engine:
 The audio contract is fixed by the harness: `measure_ttft` receives raw 16 kHz
 mono PCM16 bytes (no WAV header), already trimmed to the speech-end anchor.
 
-</details>
-
 ## Output Structure
 
 For a single dataset, console output reports the aggregate WER plus any
