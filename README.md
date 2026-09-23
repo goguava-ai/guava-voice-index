@@ -62,7 +62,7 @@ Task completion: did the caller's problem get solved? conversation_progression i
 | task_completion          | EVA-A                | 0-1   |  0.60  |
 | conversation_progression | EVA-X (LLM-as-Judge) | 0-1   |  0.40  |
 
-#### TTS Quality (15 pts)
+#### Speech Quality (15 pts)
 
 Perceptual voice quality. Human eval is the primary signal.
 
